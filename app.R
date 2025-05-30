@@ -1,51 +1,54 @@
-#
-# This is a Shiny web application. You can run the application by clicking
-# the 'Run App' button above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    https://shiny.posit.co/
-#
-
 library(shiny)
 
-# Define UI for application that draws a histogram
+# Load modules
+source("R/mod_pm_dashboard.R")
+source("R/mod_staff_dashboard.R")
+source("R/mod_finance_dashboard.R")
+
 ui <- fluidPage(
-
-    # Application title
-    titlePanel("Old Faithful Geyser Data"),
-
-    # Sidebar with a slider input for number of bins 
-    sidebarLayout(
-        sidebarPanel(
-            sliderInput("bins",
-                        "Number of bins:",
-                        min = 1,
-                        max = 50,
-                        value = 30)
-        ),
-
-        # Show a plot of the generated distribution
-        mainPanel(
-           plotOutput("distPlot")
-        )
-    )
+  titlePanel("PlanHour"),
+  uiOutput("role_selector_ui"),
+  uiOutput("main_ui")
 )
 
-# Define server logic required to draw a histogram
-server <- function(input, output) {
-
-    output$distPlot <- renderPlot({
-        # generate bins based on input$bins from ui.R
-        x    <- faithful[, 2]
-        bins <- seq(min(x), max(x), length.out = input$bins + 1)
-
-        # draw the histogram with the specified number of bins
-        hist(x, breaks = bins, col = 'darkgray', border = 'white',
-             xlab = 'Waiting time to next eruption (in mins)',
-             main = 'Histogram of waiting times')
-    })
+server <- function(input, output, session) {
+  # Get user email from shinyapps.io login
+  user_email <- reactive({
+    if (is.null(session$user)) {
+      # Local dev fallback
+      return("dev_user@toxcel.com")
+    } else {
+      return(session$user)
+    }
+  })
+  
+  
+  # Select current role/view
+  output$role_selector_ui <- renderUI({
+    req(user_email())
+    selectInput("current_role", "Select your view:",
+                choices = c("Project Manager" = "pm",
+                            "Staff" = "staff",
+                            "Finance / Management" = "finance"))
+  })
+  
+  output$main_ui <- renderUI({
+    req(input$current_role)
+    
+    switch(input$current_role,
+           "pm" = mod_pm_dashboard_ui("pm_dash"),
+           "staff" = mod_staff_dashboard_ui("staff_dash"),
+           "finance" = mod_finance_dashboard_ui("finance_dash"))
+  })
+  
+  observe({
+    req(input$current_role)
+    
+    switch(input$current_role,
+           "pm" = mod_pm_dashboard_server("pm_dash", user_email),
+           "staff" = mod_staff_dashboard_server("staff_dash", user_email),
+           "finance" = mod_finance_dashboard_server("finance_dash", user_email))
+  })
 }
 
-# Run the application 
-shinyApp(ui = ui, server = server)
+shinyApp(ui, server)
