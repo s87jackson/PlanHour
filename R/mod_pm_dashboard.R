@@ -7,330 +7,6 @@
 #' @noRd 
 #'
 #' @importFrom shiny NS tagList 
-library(bslib)  # Added for tooltip functionality
-
-
-setup_database <- function(db_path = "project_manager.db") {
-  con <- dbConnect(RSQLite::SQLite(), db_path)
-  
-  # Projects table
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS projects (
-      project_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_name TEXT NOT NULL,
-      client_name TEXT,
-      project_manager TEXT,
-      project_description TEXT,
-      start_date DATE,
-      end_date DATE,
-      total_dollar_value REAL,
-      overhead_multiplier REAL,
-      created_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  ")
-  
-  # Task budgets table
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS task_budgets (
-      task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      task_number TEXT,
-      task_name TEXT,
-      start_date DATE,
-      end_date DATE,
-      labor_budget REAL,
-      FOREIGN KEY (project_id) REFERENCES projects(project_id)
-    )
-  ")
-  
-  # Deliverables table
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS deliverables (
-      deliverable_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      deliverable_name TEXT,
-      linked_task TEXT,
-      due_date DATE,
-      FOREIGN KEY (project_id) REFERENCES projects(project_id)
-    )
-  ")
-  
-  # Staff assignments table
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS staff_assignments (
-      assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      staff_name TEXT,
-      direct_rate REAL,
-      FOREIGN KEY (project_id) REFERENCES projects(project_id)
-    )
-  ")
-  
-  # Task hour assignments table (normalized approach)
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS task_hour_assignments (
-      assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      staff_name TEXT,
-      task_number TEXT,
-      task_name TEXT,
-      hours REAL,
-      FOREIGN KEY (project_id) REFERENCES projects(project_id)
-    )
-  ")
-  
-  dbDisconnect(con)
-  return(db_path)
-}
-
-#' Save project data to database
-#' @param project_data List containing all project information
-#' @param db_path Path to database
-save_project_to_db <- function(project_data, db_path = "project_manager.db") {
-  tryCatch({
-    con <- dbConnect(RSQLite::SQLite(), db_path)
-    
-    # Start transaction
-    dbBegin(con)
-    
-    # Check if project with same name already exists
-    existing_project <- dbGetQuery(con, "
-      SELECT project_id FROM projects WHERE project_name = ?
-    ", params = list(project_data$project_info$name))
-    
-    if (nrow(existing_project) > 0) {
-      # UPDATE existing project
-      project_id <- existing_project$project_id[1]
-      
-      # Update project info
-      dbExecute(con, "
-        UPDATE projects SET 
-          client_name = ?, project_manager = ?, project_description = ?,
-          start_date = ?, end_date = ?, total_dollar_value = ?, 
-          overhead_multiplier = ?, updated_timestamp = CURRENT_TIMESTAMP
-        WHERE project_id = ?
-      ", params = list(
-        project_data$project_info$client,
-        project_data$project_info$manager,
-        project_data$project_info$description,
-        as.character(project_data$project_info$start_date),
-        as.character(project_data$project_info$end_date),
-        project_data$project_info$total_value,
-        project_data$project_info$overhead,
-        project_id
-      ))
-      
-      # Delete existing related data
-      dbExecute(con, "DELETE FROM task_budgets WHERE project_id = ?", params = list(project_id))
-      dbExecute(con, "DELETE FROM deliverables WHERE project_id = ?", params = list(project_id))
-      dbExecute(con, "DELETE FROM staff_assignments WHERE project_id = ?", params = list(project_id))
-      dbExecute(con, "DELETE FROM task_hour_assignments WHERE project_id = ?", params = list(project_id))
-      
-      action_message <- "updated"
-      
-    } else {
-      # INSERT new project
-      dbExecute(con, "
-        INSERT INTO projects (
-          project_name, client_name, project_manager, project_description,
-          start_date, end_date, total_dollar_value, overhead_multiplier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ", params = list(
-        project_data$project_info$name,
-        project_data$project_info$client,
-        project_data$project_info$manager,
-        project_data$project_info$description,
-        as.character(project_data$project_info$start_date),
-        as.character(project_data$project_info$end_date),
-        project_data$project_info$total_value,
-        project_data$project_info$overhead
-      ))
-      
-      # Get the project_id
-      project_id <- dbGetQuery(con, "SELECT last_insert_rowid() as id")$id
-      action_message <- "saved"
-    }
-    
-    # Insert task budgets (same for both update and insert)
-    if (!is.null(project_data$task_budget) && nrow(project_data$task_budget) > 0) {
-      for (i in 1:nrow(project_data$task_budget)) {
-        task <- project_data$task_budget[i, ]
-        dbExecute(con, "
-          INSERT INTO task_budgets (
-            project_id, task_number, task_name, start_date, end_date, labor_budget
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        ", params = list(
-          project_id,
-          task$Task_Number,
-          task$Task_Name,
-          task$Start_Date,
-          task$End_Date,
-          task$Toxcel_Labor_Budget
-        ))
-      }
-    }
-    
-    # Insert deliverables (same for both update and insert)
-    if (!is.null(project_data$deliverables) && nrow(project_data$deliverables) > 0) {
-      for (i in 1:nrow(project_data$deliverables)) {
-        deliv <- project_data$deliverables[i, ]
-        dbExecute(con, "
-          INSERT INTO deliverables (
-            project_id, deliverable_name, linked_task, due_date
-          ) VALUES (?, ?, ?, ?)
-        ", params = list(
-          project_id,
-          deliv$Deliverable_Name,
-          deliv$Linked_Task,
-          as.character(deliv$Due_Date)
-        ))
-      }
-    }
-    
-    # Insert staff assignments (same for both update and insert)
-    if (!is.null(project_data$staff_assignments) && nrow(project_data$staff_assignments) > 0) {
-      for (i in 1:nrow(project_data$staff_assignments)) {
-        staff <- project_data$staff_assignments[i, ]
-        
-        # Insert basic staff info
-        dbExecute(con, "
-          INSERT INTO staff_assignments (
-            project_id, staff_name, direct_rate
-          ) VALUES (?, ?, ?)
-        ", params = list(
-          project_id,
-          staff$Staff_Name,
-          staff$Direct_Rate
-        ))
-        
-        # Insert task hour assignments separately
-        task_cols <- names(staff)[grepl("^Hours_", names(staff))]
-        if (length(task_cols) > 0) {
-          for (task_col in task_cols) {
-            hours <- staff[[task_col]]
-            if (!is.na(hours) && hours > 0) {
-              # Extract task name from column name
-              task_name <- gsub("^Hours_", "", task_col)
-              task_name <- gsub("\\.", " ", task_name)
-              
-              # Find corresponding task number from task_budget
-              task_info <- project_data$task_budget[project_data$task_budget$Task_Name == task_name, ]
-              task_number <- if (nrow(task_info) > 0) task_info$Task_Number[1] else ""
-              
-              dbExecute(con, "
-                INSERT INTO task_hour_assignments (
-                  project_id, staff_name, task_number, task_name, hours
-                ) VALUES (?, ?, ?, ?, ?)
-              ", params = list(
-                project_id,
-                staff$Staff_Name,
-                task_number,
-                task_name,
-                hours
-              ))
-            }
-          }
-        }
-      }
-    }
-    
-    # Commit transaction
-    dbCommit(con)
-    dbDisconnect(con)
-    
-    return(list(
-      success = TRUE, 
-      project_id = project_id, 
-      message = paste0("Project ", action_message, " successfully!"),
-      action = action_message
-    ))
-    
-  }, error = function(e) {
-    if (exists("con")) {
-      dbRollback(con)
-      dbDisconnect(con)
-    }
-    return(list(success = FALSE, message = paste("Error saving project:", e$message)))
-  })
-}
-
-#' Load project from database
-#' @param project_id Project ID to load
-#' @param db_path Path to database
-load_project_from_db <- function(project_id, db_path = "project_manager.db") {
-  tryCatch({
-    con <- dbConnect(RSQLite::SQLite(), db_path)
-    
-    # Load project info
-    project <- dbGetQuery(con, "SELECT * FROM projects WHERE project_id = ?", 
-                          params = list(project_id))
-    
-    # Load task budgets
-    tasks <- dbGetQuery(con, "SELECT * FROM task_budgets WHERE project_id = ?", 
-                        params = list(project_id))
-    
-    # Load deliverables
-    deliverables <- dbGetQuery(con, "SELECT * FROM deliverables WHERE project_id = ?", 
-                               params = list(project_id))
-    
-    # Load staff assignments
-    staff <- dbGetQuery(con, "SELECT * FROM staff_assignments WHERE project_id = ?", 
-                        params = list(project_id))
-    
-    # Load task hour assignments
-    task_hours <- dbGetQuery(con, "SELECT * FROM task_hour_assignments WHERE project_id = ?", 
-                             params = list(project_id))
-    
-    dbDisconnect(con)
-    
-    return(list(
-      success = TRUE,
-      project = project,
-      tasks = tasks,
-      deliverables = deliverables,
-      staff = staff,
-      task_hours = task_hours
-    ))
-    
-  }, error = function(e) {
-    if (exists("con")) dbDisconnect(con)
-    return(list(success = FALSE, message = paste("Error loading project:", e$message)))
-  })
-}
-
-
-#' Get list of all projects
-get_project_list <- function(db_path = "project_manager.db") {
-  tryCatch({
-    con <- dbConnect(RSQLite::SQLite(), db_path)
-    projects <- dbGetQuery(con, "
-      SELECT project_id, project_name, client_name, project_manager, 
-             created_timestamp, updated_timestamp,
-             total_dollar_value,
-             start_date, end_date
-      FROM projects 
-      ORDER BY updated_timestamp DESC
-    ")
-    dbDisconnect(con)
-    return(projects)
-  }, error = function(e) {
-    if (exists("con")) dbDisconnect(con)
-    return(data.frame(
-      project_id = integer(0),
-      project_name = character(0),
-      client_name = character(0),
-      project_manager = character(0),
-      created_timestamp = character(0),
-      updated_timestamp = character(0),
-      total_dollar_value = numeric(0),
-      start_date = character(0),
-      end_date = character(0)
-    ))
-  })
-}
-
-
 
 
 
@@ -369,34 +45,91 @@ mod_pm_dashboard_ui <- function(id){
         column(12,
                wellPanel(
                  h3("Project Information"),
+                 
+                 # Project Name
                  fluidRow(
-                   column(6,
-                          textInput(ns("project_name"), "Project Name:", value = "", width = "100%"),
-                          textInput(ns("client_name"), "Client Name:", value = "", width = "100%"),      # FIX 1: MOVED UP
-                          textInput(ns("project_manager"), "Project Manager:", value = "", width = "100%"), # FIX 1: MOVED DOWN
-                          textAreaInput(ns("project_description"), "Project Description:", 
-                                        value = "", width = "100%", height = "80px")
+                   column(3,
+                          tags$label("Project Name:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
                    ),
-                   column(6,
-                          div(style = "display: flex; align-items: center; margin-bottom: 15px;",
-                              tags$label("Period of Performance Start:", style = "margin-right: 10px; min-width: 200px;"),
-                              dateInput(ns("start_date"), "", value = Sys.Date(), width = "150px")
-                          ),
-                          div(style = "display: flex; align-items: center; margin-bottom: 15px;",
-                              tags$label("Period of Performance End:", style = "margin-right: 10px; min-width: 200px;"),
-                              dateInput(ns("end_date"), "", value = Sys.Date() + 365, width = "150px")
-                          ),
-                          div(style = "display: flex; align-items: center; margin-bottom: 15px;",
-                              tags$label("Total Dollar Value:", style = "margin-right: 10px; min-width: 200px;"),
-                              numericInput(ns("total_dollar_value"), "", 
-                                           value = 0, min = 0, step = 1000, width = "130px")
+                   column(9,
+                          textInput(ns("project_name"), "", value = "", width = "100%")
+                   )
+                 ),
+                 
+                 # Project ID
+                 fluidRow(
+                   column(3,
+                          tags$label("Project ID:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
+                   ),
+                   column(9,
+                          textInput(ns("project_id"), "", value = "", width = "100%")
+                   )
+                 ),
+                 
+                 # Client Name
+                 fluidRow(
+                   column(3,
+                          tags$label("Client Name:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
+                   ),
+                   column(9,
+                          textInput(ns("client_name"), "", value = "", width = "100%")
+                   )
+                 ),
+                 
+                 # Project Manager
+                 fluidRow(
+                   column(3,
+                          tags$label("Project Manager:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
+                   ),
+                   column(9,
+                          selectInput(ns("project_manager"), "", 
+                                      choices = c("Select a project manager..." = "", WWusers$fullName),
+                                      selected = "",
+                                      width = "100%")
+                   )
+                 ),                 
+                 # Period of Performance (start and end on same line)
+                 fluidRow(
+                   column(3,
+                          tags$label("Period of Performance:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
+                   ),
+                   column(9,
+                          div(style = "display: flex; gap: 10px;",
+                              div(style = "flex: 1;",
+                                  dateInput(ns("start_date"), "", value = Sys.Date(), width = "100%")
+                              ),
+                              div(style = "flex: 1;",
+                                  dateInput(ns("end_date"), "", value = Sys.Date() + 365, width = "100%")
+                              )
                           )
+                   )
+                 ),
+                 
+                 # Total Dollar Value
+                 fluidRow(
+                   column(3,
+                          tags$label("Total Dollar Value:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
+                   ),
+                   column(9,
+                          numericInput(ns("total_dollar_value"), "", 
+                                       value = 0, min = 0, step = 1000, width = "100%")
+                   )
+                 ),
+                 
+                 # Project Description - label on left, text area spans right side below
+                 fluidRow(
+                   column(3,
+                          tags$label("Project Description:", style = "font-weight: bold; display: inline-block; vertical-align: middle;")
+                   ),
+                   column(9,
+                          textAreaInput(ns("project_description"), "", 
+                                        value = "", width = "100%", height = "80px", 
+                                        placeholder = "Enter project description...")
                    )
                  )
                )
         )
-      ),
-      
+      ),      
       # Task Budget Matrix Section
       fluidRow(
         column(12,
@@ -514,8 +247,8 @@ mod_pm_dashboard_ui <- function(id){
       fluidRow(
         column(12,
                hr(),
-               h5("Save Project"),
-               p("Save all project data to database for future reference."),
+               #h5("Save Project"),
+               #p("Save all project data to database for future reference."),
                actionButton(ns("save_project"), "Save Project to Database", 
                             class = "btn-success", icon = icon("save"),
                             style = "font-size: 16px; padding: 10px 20px;")
@@ -580,18 +313,17 @@ mod_pm_dashboard_server <- function(id){
       req(input$project_to_load)
       
       if (input$project_to_load == "") {
-        return()  # Do nothing if "Select a project..." is chosen
+        return()
       }
       
       showNotification("Loading project...", type = "message", duration = 2)
       
-      # Load project data
       result <- load_project_from_db(as.numeric(input$project_to_load))
       
       if (result$success) {
-        # Update project information inputs
         project <- result$project
         updateTextInput(session, "project_name", value = project$project_name)
+        updateTextInput(session, "project_id", value = ifelse(is.na(project$project_id_text), "", project$project_id_text))
         updateTextInput(session, "client_name", value = project$client_name)
         updateTextInput(session, "project_manager", value = project$project_manager)
         updateTextAreaInput(session, "project_description", value = project$project_description)
@@ -702,6 +434,7 @@ mod_pm_dashboard_server <- function(id){
     observeEvent(input$clear_form, {
       # Reset all inputs to defaults
       updateTextInput(session, "project_name", value = "")
+      updateTextInput(session, "project_id", value = "")
       updateTextInput(session, "client_name", value = "")
       updateTextInput(session, "project_manager", value = "")
       updateTextAreaInput(session, "project_description", value = "")
@@ -804,24 +537,7 @@ mod_pm_dashboard_server <- function(id){
       )
     })
     
-    # Helper function to get next task number
-    get_next_task_number <- function(current_data) {
-      if (is.null(current_data) || nrow(current_data) == 0) {
-        return("1")
-      }
-      
-      # Extract main task numbers (ignore subtasks)
-      task_numbers <- current_data$Task_Number
-      main_numbers <- as.numeric(gsub("\\..*", "", task_numbers))
-      main_numbers <- main_numbers[!is.na(main_numbers)]
-      
-      if (length(main_numbers) == 0) {
-        return("1")
-      }
-      
-      next_main <- max(main_numbers) + 1
-      return(as.character(next_main))
-    }
+ 
     
     # Add task
     observeEvent(input$add_task_budget, {
@@ -851,18 +567,7 @@ mod_pm_dashboard_server <- function(id){
         return()
       }
       
-      # Custom sort function for hierarchical task numbers
-      sort_task_numbers <- function(task_nums) {
-        # Split into main and sub components
-        split_nums <- lapply(task_nums, function(x) {
-          parts <- strsplit(as.character(x), "\\.")[[1]]
-          as.numeric(parts)
-        })
-        
-        # Sort by main task, then subtask
-        order(sapply(split_nums, function(x) x[1]), 
-              sapply(split_nums, function(x) ifelse(length(x) > 1, x[2], 0)))
-      }
+
       
       sorted_indices <- sort_task_numbers(current_data$Task_Number)
       sorted_data <- current_data[sorted_indices, ]
@@ -1207,6 +912,7 @@ mod_pm_dashboard_server <- function(id){
       project_data <- list(
         project_info = list(
           name = input$project_name,
+          project_id_text = input$project_id,
           client = input$client_name,
           manager = input$project_manager,
           description = input$project_description,
@@ -1232,8 +938,7 @@ mod_pm_dashboard_server <- function(id){
       } else {
         showNotification(result$message, type = "error", duration = 10)
       }
-    })
-    
+    })    
     
     
     
@@ -1244,6 +949,7 @@ mod_pm_dashboard_server <- function(id){
       project_info = reactive({
         list(
           name = input$project_name,
+          project_id_text = input$project_id,
           manager = input$project_manager,
           client = input$client_name,
           description = input$project_description,

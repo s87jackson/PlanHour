@@ -1,20 +1,7 @@
 # Planhour - Project Management Shiny App
 # Main application file
 
-# Load required libraries
-library(shiny)
-library(shinydashboard)
-library(DT)
-library(rhandsontable)
-library(scales)
-library(ggplot2)
-library(ggiraph)
-library(dplyr)
-library(shinyjs)
 
-library(DBI)
-library(RSQLite)  
-library(jsonlite)
 
 # Source all module files (adjust paths as needed for your structure)
 # If using {golem} framework, these would be automatically loaded
@@ -108,7 +95,19 @@ ui <- dashboardPage(
       # Project Manager Dashboard Tab
       tabItem(
         tabName = "pm_dashboard",
-        mod_pm_dashboard_ui("pm_dashboard")
+        mod_pm_dashboard_ui("pm_dashboard"),
+        
+        fluidRow(
+          column(12,
+                 wellPanel(
+                   h3("Project Gantt Chart"),
+                   p("Interactive timeline showing all tasks and deliverables. Hover over items for details."),
+                   div(style = "background: white; border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin: 10px 0;",
+                       ggiraph::girafeOutput("pm_gantt_chart", height = "500px")
+                   )
+                 )
+          )
+        )
       ),
       
       # Staff View Tab (placeholder for future implementation)
@@ -256,6 +255,38 @@ server <- function(input, output, session) {
       "))
     }
   })
+  
+  
+  # Initialize Project Manager module
+  pm_data <- mod_pm_dashboard_server("pm_dashboard")
+  
+  # PM Dashboard Gantt Chart
+  output$pm_gantt_chart <- ggiraph::renderGirafe({
+    req(pm_data$task_budget(), pm_data$deliverables())
+    
+    p <- create_gantt_chart(
+      task_data = pm_data$task_budget(),
+      deliverable_data = pm_data$deliverables(),
+      project_start = pm_data$project_info()$start_date,
+      project_end = pm_data$project_info()$end_date
+    )
+    
+    # Make it interactive with ggiraph
+    ggiraph::girafe(
+      ggobj = p,
+      options = list(
+        ggiraph::opts_hover_inv(css = "opacity:0.3;"),
+        ggiraph::opts_hover(css = "stroke-width:2px; stroke:black;"),
+        ggiraph::opts_tooltip(
+          css = "background-color:#333;color:white;padding:10px;border-radius:5px;font-size:12px;max-width:300px;"
+        ),
+        ggiraph::opts_zoom(min = 0.5, max = 3)
+      ),
+      height_svg = 8,
+      width_svg = 12
+    )
+  })
+  
   
   # For future modules, you would initialize them here:
   # staff_data <- mod_staff_view_server("staff_view", pm_data)
