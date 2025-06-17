@@ -12,14 +12,19 @@ library(ggiraph)
 library(dplyr)
 library(shinyjs)
 
+library(DBI)
+library(RSQLite)  
+library(jsonlite)
+
 # Source all module files (adjust paths as needed for your structure)
 # If using {golem} framework, these would be automatically loaded
 source("R/mod_pm_dashboard.R")
 # source("R/mod_staff_view.R")      # For future implementation
 # source("R/mod_finance_view.R")    # For future implementation
 
-# Define UI
+# Define UI ----
 ui <- dashboardPage(
+  
   dashboardHeader(title = "Planhour - Project Management"),
   
   dashboardSidebar(
