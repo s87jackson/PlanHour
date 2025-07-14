@@ -13,14 +13,17 @@ clear_database <- function(db_path = "project_manager.db") {
     dbBegin(con)
     
     # Delete all data (order matters due to foreign keys)
-    dbExecute(con, "DELETE FROM task_hour_assignments")
-    dbExecute(con, "DELETE FROM staff_assignments")
+    dbExecute(con, "DELETE FROM labor_cat_staff")
+    dbExecute(con, "DELETE FROM labor_cat_hours") 
+    dbExecute(con, "DELETE FROM labor_cat_rates")
+    dbExecute(con, "DELETE FROM labor_categories")
     dbExecute(con, "DELETE FROM deliverables")
     dbExecute(con, "DELETE FROM task_budgets")
     dbExecute(con, "DELETE FROM projects")
+
     
     # Reset auto-increment counters
-    dbExecute(con, "DELETE FROM sqlite_sequence WHERE name IN ('projects', 'task_budgets', 'deliverables', 'staff_assignments', 'task_hour_assignments')")
+    dbExecute(con, "DELETE FROM sqlite_sequence WHERE name IN ('projects', 'task_budgets', 'deliverables', 'labor_categories', 'labor_cat_rates', 'labor_cat_hours', 'labor_cat_staff')")
     
     # Commit transaction
     dbCommit(con)
@@ -72,8 +75,9 @@ delete_project_by_name <- function(project_name, db_path = "project_manager.db")
     dbBegin(con)
     
     # Delete in order (foreign key constraints)
-    dbExecute(con, "DELETE FROM task_hour_assignments WHERE project_id = ?", params = list(project_id))
-    dbExecute(con, "DELETE FROM staff_assignments WHERE project_id = ?", params = list(project_id))
+    dbExecute(con, "DELETE FROM labor_cat_rates WHERE project_id = ?", params = list(project_id))
+    dbExecute(con, "DELETE FROM labor_cat_hours WHERE project_id = ?", params = list(project_id))
+    dbExecute(con, "DELETE FROM labor_cat_staff WHERE project_id = ?", params = list(project_id))
     dbExecute(con, "DELETE FROM deliverables WHERE project_id = ?", params = list(project_id))
     dbExecute(con, "DELETE FROM task_budgets WHERE project_id = ?", params = list(project_id))
     dbExecute(con, "DELETE FROM projects WHERE project_id = ?", params = list(project_id))
@@ -108,33 +112,34 @@ view_database_contents <- function(db_path = "project_manager.db") {
     cat("📊 DATABASE CONTENTS:\n")
     cat(paste(rep("=", 50), collapse = ""), "\n")
     
-    # Projects
-    projects <- dbGetQuery(con, "SELECT * FROM projects ORDER BY project_id")
-    cat("PROJECTS (", nrow(projects), " records):\n")
-    if (nrow(projects) > 0) {
-      for (i in 1:nrow(projects)) {
-        cat("  ", projects$project_id[i], ": ", projects$project_name[i], 
-            " (", projects$client_name[i], ")\n")
+    # Get list of all tables
+    tables <- dbListTables(con)
+    cat("Tables found:", length(tables), "-", paste(tables, collapse = ", "), "\n\n")
+    
+    # Print each table individually (up to 100 rows)
+    for(table_name in tables) {
+      cat("TABLE:", toupper(table_name), "\n")
+      cat(paste(rep("-", 30), collapse = ""), "\n")
+      
+      # Get table info
+      table_info <- dbGetQuery(con, paste("PRAGMA table_info(", table_name, ")"))
+      cat("Columns:", paste(table_info$name, collapse = ", "), "\n")
+      
+      # Get data (limit to 100 rows)
+      data <- dbGetQuery(con, paste("SELECT * FROM", table_name, "LIMIT 100"))
+      cat("Rows:", nrow(data), "\n")
+      
+      if (nrow(data) > 0) {
+        # Print first few rows
+        print(head(data, 10))
+        if (nrow(data) > 10) {
+          cat("... (showing first 10 of", nrow(data), "rows)\n")
+        }
+      } else {
+        cat("(No data)\n")
       }
-    } else {
-      cat("  (No projects)\n")
+      cat("\n")
     }
-    
-    # Task budgets
-    tasks <- dbGetQuery(con, "SELECT COUNT(*) as count FROM task_budgets")
-    cat("\nTASK BUDGETS: ", tasks$count, " records\n")
-    
-    # Deliverables
-    deliverables <- dbGetQuery(con, "SELECT COUNT(*) as count FROM deliverables")
-    cat("DELIVERABLES: ", deliverables$count, " records\n")
-    
-    # Staff assignments
-    staff <- dbGetQuery(con, "SELECT COUNT(*) as count FROM staff_assignments")
-    cat("STAFF ASSIGNMENTS: ", staff$count, " records\n")
-    
-    # Task hour assignments
-    hours <- dbGetQuery(con, "SELECT COUNT(*) as count FROM task_hour_assignments")
-    cat("TASK HOUR ASSIGNMENTS: ", hours$count, " records\n")
     
     dbDisconnect(con)
     

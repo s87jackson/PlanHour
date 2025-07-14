@@ -1,8 +1,10 @@
-# Load required libraries
+# Libraries ----
 library(shiny)
 library(shinydashboard)
 library(DT)
 library(rhandsontable)
+library(tidyr)
+library(shinyBS)
 
 library(dplyr)
 library(shinyjs)
@@ -17,13 +19,15 @@ library(httr)
 library(scales)
 library(ggplot2)
 library(ggiraph)
+library(plotly)
 
 
+# Database ----
 
 setup_database <- function(db_path = "project_manager.db") {
   con <- dbConnect(RSQLite::SQLite(), db_path)
   
-  # Projects table
+  # Projects table ----
   dbExecute(con, "
     CREATE TABLE IF NOT EXISTS projects (
       project_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +36,7 @@ setup_database <- function(db_path = "project_manager.db") {
       client_name TEXT,
       project_manager TEXT,
       project_description TEXT,
+      project_notes TEXT,
       start_date DATE,
       end_date DATE,
       total_dollar_value REAL,
@@ -41,7 +46,7 @@ setup_database <- function(db_path = "project_manager.db") {
     )
   ")
   
-  # Task budgets table
+  # Task budgets table ----
   dbExecute(con, "
     CREATE TABLE IF NOT EXISTS task_budgets (
       task_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +60,7 @@ setup_database <- function(db_path = "project_manager.db") {
     )
   ")
   
-  # Deliverables table
+  # Deliverables table ----
   dbExecute(con, "
     CREATE TABLE IF NOT EXISTS deliverables (
       deliverable_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,39 +72,124 @@ setup_database <- function(db_path = "project_manager.db") {
     )
   ")
   
-  # Staff assignments table
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS staff_assignments (
-      assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      staff_name TEXT,
-      direct_rate REAL,
-      FOREIGN KEY (project_id) REFERENCES projects(project_id)
-    )
-  ")
+#   # Roles table ----
+#   dbExecute(con, "
+#   CREATE TABLE IF NOT EXISTS labor_categories (
+#     labor_cat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+#     project_id INTEGER,
+#     labor_cat_name TEXT NOT NULL,
+#     labor_cat_order INTEGER DEFAULT 1,
+#     FOREIGN KEY (project_id) REFERENCES projects(project_id)
+#   )
+# ")
+#   
+#   # Role rates table ----
+#   dbExecute(con, "
+#   CREATE TABLE IF NOT EXISTS labor_cat_rates (
+#     rate_id INTEGER PRIMARY KEY AUTOINCREMENT,
+#     project_id INTEGER,
+#     labor_cat_name TEXT,
+#     task_number TEXT,
+#     hourly_rate REAL DEFAULT 0,
+#     FOREIGN KEY (project_id) REFERENCES projects(project_id)
+#   )
+# ")
+#   
+#   # Role hours table  ----
+#   dbExecute(con, "
+#   CREATE TABLE IF NOT EXISTS labor_cat_hours (
+#     hours_id INTEGER PRIMARY KEY AUTOINCREMENT,
+#     project_id INTEGER,
+#     labor_cat_name TEXT,
+#     task_number TEXT,
+#     planned_hours REAL DEFAULT 0,
+#     FOREIGN KEY (project_id) REFERENCES projects(project_id)
+#   )
+# ")
+#   
+#   # Role staff assignments table ----
+#   dbExecute(con, "
+#   CREATE TABLE IF NOT EXISTS labor_cat_staff (
+#     role_staff_id INTEGER PRIMARY KEY AUTOINCREMENT,
+#     project_id INTEGER,
+#     labor_cat_name TEXT,
+#     staff_names TEXT, -- semicolon-separated list of staff names
+#     FOREIGN KEY (project_id) REFERENCES projects(project_id)
+#   )
+# ")
   
-  # Task hour assignments table
+  # Labor Categories table (renamed from roles) ----
   dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS task_hour_assignments (
-      assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      staff_name TEXT,
-      task_number TEXT,
-      task_name TEXT,
-      hours REAL,
-      FOREIGN KEY (project_id) REFERENCES projects(project_id)
-    )
-  ")
+  CREATE TABLE IF NOT EXISTS labor_categories (
+    labor_cat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    labor_cat_name TEXT NOT NULL,
+    labor_cat_order INTEGER DEFAULT 1,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+  )
+")
+  
+  # Labor category rates table (renamed from role_rates) ----
+  dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS labor_cat_rates (
+    rate_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    labor_cat_name TEXT,
+    task_number TEXT,
+    hourly_rate REAL DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+  )
+")
+  
+  # Labor category hours table (renamed from role_hours) ----
+  dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS labor_cat_hours (
+    hours_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    labor_cat_name TEXT,
+    task_number TEXT,
+    planned_hours REAL DEFAULT 0,
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+  )
+")
+  
+  # Labor category staff assignments table (renamed from role_staff) ----
+  dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS labor_cat_staff (
+    labor_cat_staff_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER,
+    labor_cat_name TEXT,
+    staff_names TEXT, -- semicolon-separated list of staff names
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+  )
+")
   
   dbDisconnect(con)
   return(db_path)
+  
 }
+
 
 #' Save project data to database
 #' @param project_data List containing all project information
 #' @param db_path Path to database
-save_project_to_db <- function(project_data, db_path = "project_manager.db") {
+#' 
+save_project_to_db <- function(project_data, db_path = "project_manager.db") {  
   tryCatch({
+    cat("=== SAVE PROJECT DEBUG START ===\n")
+    cat("Project data structure:\n")
+    str(project_data$project_info)
+    
+    cat("\n=== PARAMETER ANALYSIS ===\n")
+    info <- project_data$project_info
+    param_names <- names(info)
+    for (name in param_names) {
+      value <- info[[name]]
+      cat(sprintf("Field '%s': class=%s, length=%d, value=%s\n", 
+                  name, paste(class(value), collapse=","), length(value), 
+                  paste(as.character(value), collapse=",")))
+    }
+    
     con <- dbConnect(RSQLite::SQLite(), db_path)
     
     # Start transaction
@@ -114,139 +204,343 @@ save_project_to_db <- function(project_data, db_path = "project_manager.db") {
       # UPDATE existing project
       project_id <- existing_project$project_id[1]
       
-      # Update project info
-      dbExecute(con, "
-        UPDATE projects SET 
-          project_id_text = ?, client_name = ?, project_manager = ?, project_description = ?,
-          start_date = ?, end_date = ?, total_dollar_value = ?, 
-          overhead_multiplier = ?, updated_timestamp = CURRENT_TIMESTAMP
-        WHERE project_id = ?
-      ", params = list(
+      cat("\n=== UPDATE OPERATION DEBUG ===\n")
+      cat("Project ID:", project_id, "\n")
+      
+      # Create parameter list and debug each one
+      update_params <- list(
         project_data$project_info$project_id_text,
         project_data$project_info$client,
         project_data$project_info$manager,
         project_data$project_info$description,
+        project_data$project_info$notes,
         as.character(project_data$project_info$start_date),
         as.character(project_data$project_info$end_date),
         project_data$project_info$total_value,
         project_data$project_info$overhead,
         project_id
-      ))
+      )
+      
+      cat("UPDATE Parameters debugging:\n")
+      param_labels <- c("project_id_text", "client", "manager", "description", "notes", 
+                        "start_date", "end_date", "total_value", "overhead", "project_id")
+      
+      for (i in 1:length(update_params)) {
+        param <- update_params[[i]]
+        cat(sprintf("Param %d (%s): class=%s, length=%d, value=%s\n", 
+                    i, param_labels[i], paste(class(param), collapse=","), 
+                    length(param), paste(as.character(param), collapse=",")))
+        
+        if (length(param) != 1) {
+          cat("*** ERROR: Parameter", i, "has length", length(param), "instead of 1! ***\n")
+        }
+      }
+      
+      # Project info ----
+      dbExecute(con, "
+        UPDATE projects SET 
+          project_id_text = ?, client_name = ?, project_manager = ?, project_description = ?, project_notes = ?,
+          start_date = ?, end_date = ?, total_dollar_value = ?, 
+          overhead_multiplier = ?, updated_timestamp = CURRENT_TIMESTAMP
+        WHERE project_id = ?
+       ", params = update_params
+      )
       
       # Delete existing related data
       dbExecute(con, "DELETE FROM task_budgets WHERE project_id = ?", params = list(project_id))
       dbExecute(con, "DELETE FROM deliverables WHERE project_id = ?", params = list(project_id))
-      dbExecute(con, "DELETE FROM staff_assignments WHERE project_id = ?", params = list(project_id))
-      dbExecute(con, "DELETE FROM task_hour_assignments WHERE project_id = ?", params = list(project_id))
+      dbExecute(con, "DELETE FROM labor_cat_rates WHERE project_id = ?", params = list(project_id))
+      dbExecute(con, "DELETE FROM labor_cat_hours WHERE project_id = ?", params = list(project_id))
+      dbExecute(con, "DELETE FROM labor_cat_staff WHERE project_id = ?", params = list(project_id))
       
       action_message <- "updated"
       
     } else {
-      # INSERT new project
-      dbExecute(con, "
-        INSERT INTO projects (
-          project_name, project_id_text, client_name, project_manager, project_description,
-          start_date, end_date, total_dollar_value, overhead_multiplier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ", params = list(
+      # INSERT new project ----
+      cat("\n=== INSERT OPERATION DEBUG ===\n")
+      
+      # Create parameter list and debug each one
+      insert_params <- list(
         project_data$project_info$name,
         project_data$project_info$project_id_text,
         project_data$project_info$client,
         project_data$project_info$manager,
         project_data$project_info$description,
+        project_data$project_info$notes,
         as.character(project_data$project_info$start_date),
         as.character(project_data$project_info$end_date),
         project_data$project_info$total_value,
         project_data$project_info$overhead
-      ))
+      )
+      
+      cat("INSERT Parameters debugging:\n")
+      param_labels <- c("name", "project_id_text", "client", "manager", "description", "notes", 
+                        "start_date", "end_date", "total_value", "overhead")
+      
+      for (i in 1:length(insert_params)) {
+        param <- insert_params[[i]]
+        cat(sprintf("Param %d (%s): class=%s, length=%d, value=%s\n", 
+                    i, param_labels[i], paste(class(param), collapse=","), 
+                    length(param), paste(as.character(param), collapse=",")))
+        
+        if (length(param) != 1) {
+          cat("*** ERROR: Parameter", i, "has length", length(param), "instead of 1! ***\n")
+        }
+      }
+      
+      dbExecute(con, "
+        INSERT INTO projects (
+          project_name, project_id_text, client_name, project_manager, project_description, project_notes,
+          start_date, end_date, total_dollar_value, overhead_multiplier
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ", params = insert_params
+      )
       
       # Get the project_id
       project_id <- dbGetQuery(con, "SELECT last_insert_rowid() as id")$id
       action_message <- "saved"
     }
     
-    # Insert task budgets (same for both update and insert)
+    # Task budgets (same for both update and insert) ----
+    cat("\n=== TASK BUDGETS DEBUG ===\n")
     if (!is.null(project_data$task_budget) && nrow(project_data$task_budget) > 0) {
+      cat("Task budget data structure:\n")
+      str(project_data$task_budget)
+      
       for (i in 1:nrow(project_data$task_budget)) {
         task <- project_data$task_budget[i, ]
-        dbExecute(con, "
-          INSERT INTO task_budgets (
-            project_id, task_number, task_name, start_date, end_date, labor_budget
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        ", params = list(
+        
+        cat(sprintf("\nTask %d parameters:\n", i))
+        task_params <- list(
           project_id,
           task$Task_Number,
           task$Task_Name,
           task$Start_Date,
           task$End_Date,
           task$Toxcel_Labor_Budget
-        ))
+        )
+        
+        task_labels <- c("project_id", "Task_Number", "Task_Name", "Start_Date", "End_Date", "Toxcel_Labor_Budget")
+        for (j in 1:length(task_params)) {
+          param <- task_params[[j]]
+          cat(sprintf("  Task Param %d (%s): class=%s, length=%d, value=%s\n", 
+                      j, task_labels[j], paste(class(param), collapse=","), 
+                      length(param), paste(as.character(param), collapse=",")))
+          
+          if (length(param) != 1) {
+            cat("  *** ERROR: Task Parameter", j, "has length", length(param), "instead of 1! ***\n")
+          }
+        }
+        
+        dbExecute(con, "
+          INSERT INTO task_budgets (
+            project_id, task_number, task_name, start_date, end_date, labor_budget
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        ", params = task_params)
       }
+    } else {
+      cat("No task budget data to save\n")
     }
     
-    # Insert deliverables (same for both update and insert)
+    
+    # Deliverables (same for both update and insert) ----
+    cat("\n=== DELIVERABLES DEBUG ===\n")
     if (!is.null(project_data$deliverables) && nrow(project_data$deliverables) > 0) {
+      cat("Deliverables data structure:\n")
+      str(project_data$deliverables)
+      
       for (i in 1:nrow(project_data$deliverables)) {
         deliv <- project_data$deliverables[i, ]
-        dbExecute(con, "
-          INSERT INTO deliverables (
-            project_id, deliverable_name, linked_task, due_date
-          ) VALUES (?, ?, ?, ?)
-        ", params = list(
+        
+        cat(sprintf("\nDeliverable %d parameters:\n", i))
+        deliv_params <- list(
           project_id,
           deliv$Deliverable_Name,
           deliv$Linked_Task,
           as.character(deliv$Due_Date)
-        ))
-      }
-    }
-    
-    # Insert staff assignments (same for both update and insert)
-    if (!is.null(project_data$staff_assignments) && nrow(project_data$staff_assignments) > 0) {
-      for (i in 1:nrow(project_data$staff_assignments)) {
-        staff <- project_data$staff_assignments[i, ]
+        )
         
-        # Insert basic staff info
-        dbExecute(con, "
-          INSERT INTO staff_assignments (
-            project_id, staff_name, direct_rate
-          ) VALUES (?, ?, ?)
-        ", params = list(
-          project_id,
-          staff$Staff_Name,
-          staff$Direct_Rate
-        ))
-        
-        # Insert task hour assignments separately
-        task_cols <- names(staff)[grepl("^Hours_", names(staff))]
-        if (length(task_cols) > 0) {
-          for (task_col in task_cols) {
-            hours <- staff[[task_col]]
-            if (!is.na(hours) && hours > 0) {
-              # Extract task name from column name
-              task_name <- gsub("^Hours_", "", task_col)
-              task_name <- gsub("\\.", " ", task_name)
-              
-              # Find corresponding task number from task_budget
-              task_info <- project_data$task_budget[project_data$task_budget$Task_Name == task_name, ]
-              task_number <- if (nrow(task_info) > 0) task_info$Task_Number[1] else ""
-              
-              dbExecute(con, "
-                INSERT INTO task_hour_assignments (
-                  project_id, staff_name, task_number, task_name, hours
-                ) VALUES (?, ?, ?, ?, ?)
-              ", params = list(
-                project_id,
-                staff$Staff_Name,
-                task_number,
-                task_name,
-                hours
-              ))
-            }
+        deliv_labels <- c("project_id", "Deliverable_Name", "Linked_Task", "Due_Date")
+        for (j in 1:length(deliv_params)) {
+          param <- deliv_params[[j]]
+          cat(sprintf("  Deliv Param %d (%s): class=%s, length=%d, value=%s\n", 
+                      j, deliv_labels[j], paste(class(param), collapse=","), 
+                      length(param), paste(as.character(param), collapse=",")))
+          
+          if (length(param) != 1) {
+            cat("  *** ERROR: Deliverable Parameter", j, "has length", length(param), "instead of 1! ***\n")
           }
         }
+        
+        dbExecute(con, "
+          INSERT INTO deliverables (
+            project_id, deliverable_name, linked_task, due_date
+          ) VALUES (?, ?, ?, ?)
+        ", params = deliv_params)
       }
+    } else {
+      cat("No deliverables data to save\n")
     }
+    
+    
+    # Labor Categories ----
+    cat("\n=== LABOR CATEGORIES DEBUG ===\n")
+    if (!is.null(project_data$labor_categories) && nrow(project_data$labor_categories) > 0) {
+      cat("Labor categories data structure:\n")
+      str(project_data$labor_categories)
+      
+      # Clear existing labor_categories
+      dbExecute(con, "DELETE FROM labor_categories WHERE project_id = ?", params = list(project_id))
+      
+      # Insert new labor_categories
+      for (i in 1:nrow(project_data$labor_categories)) {
+        cat(sprintf("\nLabor Category %d parameters:\n", i))
+        
+        # Check if the column exists
+        if ("Role" %in% names(project_data$labor_categories)) {
+          labor_cat_name <- project_data$labor_categories$Role[i]
+        } else if ("LaborCategory" %in% names(project_data$labor_categories)) {
+          labor_cat_name <- project_data$labor_categories$LaborCategory[i]
+        } else {
+          cat("ERROR: Neither 'Role' nor 'LaborCategory' column found!\n")
+          cat("Available columns:", paste(names(project_data$labor_categories), collapse=", "), "\n")
+          next
+        }
+        
+        labor_cat_params <- list(project_id, labor_cat_name, i)
+        
+        labor_cat_labels <- c("project_id", "labor_cat_name", "labor_cat_order")
+        for (j in 1:length(labor_cat_params)) {
+          param <- labor_cat_params[[j]]
+          cat(sprintf("  LaborCat Param %d (%s): class=%s, length=%d, value=%s\n", 
+                      j, labor_cat_labels[j], paste(class(param), collapse=","), 
+                      length(param), paste(as.character(param), collapse=",")))
+          
+          if (length(param) != 1) {
+            cat("  *** ERROR: Labor Category Parameter", j, "has length", length(param), "instead of 1! ***\n")
+          }
+        }
+        
+        dbExecute(con, "
+      INSERT INTO labor_categories (project_id, labor_cat_name, labor_cat_order) 
+      VALUES (?, ?, ?)
+    ", params = labor_cat_params)
+      }
+    } else {
+      cat("No labor categories data to save\n")
+    }
+    
+    
+    # Rates ----
+    cat("\n=== RATES DEBUG ===\n")
+    if (!is.null(project_data$labor_cat_rates) && nrow(project_data$labor_cat_rates) > 0) {
+      cat("Rates data structure:\n")
+      str(project_data$labor_cat_rates)
+      
+      # Clear existing rates
+      dbExecute(con, "DELETE FROM labor_cat_rates WHERE project_id = ?", params = list(project_id))
+      
+      # Insert new rates
+      rates_data_db <- project_data$labor_cat_rates
+      for (i in 1:nrow(rates_data_db)) {
+        rate_params <- list(
+          project_id, 
+          rates_data_db$labor_cat_name[i], 
+          rates_data_db$task_number[i], 
+          rates_data_db$year_number[i],
+          rates_data_db$hourly_rate[i]
+        )
+        
+        dbExecute(con, "
+          INSERT INTO labor_cat_rates (project_id, labor_cat_name, task_number, year_number, hourly_rate) 
+          VALUES (?, ?, ?, ?, ?)
+        ", params = rate_params)
+      }
+    } else {
+      cat("No rates data to save\n")
+    }
+    
+    # Hours ----
+    cat("\n=== HOURS DEBUG ===\n")
+    if (!is.null(project_data$labor_cat_hours) && nrow(project_data$labor_cat_hours) > 0) {
+      cat("Hours data structure:\n")
+      str(project_data$labor_cat_hours)
+      
+      # Clear existing hours
+      dbExecute(con, "DELETE FROM labor_cat_hours WHERE project_id = ?", params = list(project_id))
+      
+      # Insert new hours
+      hours_data_db <- project_data$labor_cat_hours
+      for (i in 1:nrow(hours_data_db)) {
+        hours_params <- list(
+          project_id, 
+          hours_data_db$labor_cat_name[i], 
+          hours_data_db$task_number[i], 
+          hours_data_db$year_number[i],
+          hours_data_db$planned_hours[i]
+        )
+        
+        dbExecute(con, "
+          INSERT INTO labor_cat_hours (project_id, labor_cat_name, task_number, year_number, planned_hours) 
+          VALUES (?, ?, ?, ?, ?)
+        ", params = hours_params)
+      }
+    } else {
+      cat("No hours data to save\n")
+    }
+    
+    
+    
+    # Labor Category Staff ----
+    cat("\n=== STAFF ASSIGNMENTS DEBUG ===\n")
+    if (!is.null(project_data$labor_cat_staff) && nrow(project_data$labor_cat_staff) > 0) {
+      cat("Staff assignments data structure:\n")
+      str(project_data$labor_cat_staff)
+      
+      # Clear existing staff assignments
+      dbExecute(con, "DELETE FROM labor_cat_staff WHERE project_id = ?", params = list(project_id))
+      
+      # Insert new staff assignments
+      for (i in 1:nrow(project_data$labor_cat_staff)) {
+        cat(sprintf("\nStaff assignment %d parameters:\n", i))
+        
+        # Check column names
+        if ("Role" %in% names(project_data$labor_cat_staff)) {
+          labor_cat_name <- project_data$labor_cat_staff$Role[i]
+          staff_members <- project_data$labor_cat_staff$Staff_Members[i]
+        } else if ("LaborCategory" %in% names(project_data$labor_cat_staff)) {
+          labor_cat_name <- project_data$labor_cat_staff$LaborCategory[i]
+          staff_members <- project_data$labor_cat_staff$Staff_Members[i]
+        } else {
+          cat("ERROR: Neither 'Role' nor 'LaborCategory' column found in staff!\n")
+          cat("Available columns:", paste(names(project_data$labor_cat_staff), collapse=", "), "\n")
+          next
+        }
+        
+        staff_params <- list(project_id, labor_cat_name, staff_members)
+        staff_labels <- c("project_id", "labor_cat_name", "staff_names")
+        
+        for (j in 1:length(staff_params)) {
+          param <- staff_params[[j]]
+          cat(sprintf("  Staff Param %d (%s): class=%s, length=%d, value=%s\n", 
+                      j, staff_labels[j], paste(class(param), collapse=","), 
+                      length(param), paste(as.character(param), collapse=",")))
+          
+          if (length(param) != 1) {
+            cat("  *** ERROR: Staff Parameter", j, "has length", length(param), "instead of 1! ***\n")
+          }
+        }
+        
+        dbExecute(con, "
+          INSERT INTO labor_cat_staff (project_id, labor_cat_name, staff_names)
+          VALUES (?, ?, ?)
+        ", params = staff_params)
+      }
+    } else {
+      cat("No staff assignments data to save\n")
+    }
+    
+    
     
     # Commit transaction
     dbCommit(con)
@@ -274,6 +568,7 @@ save_project_to_db <- function(project_data, db_path = "project_manager.db") {
 #' Load project from database
 #' @param project_id Project ID to load
 #' @param db_path Path to database
+
 load_project_from_db <- function(project_id, db_path = "project_manager.db") {
   tryCatch({
     con <- dbConnect(RSQLite::SQLite(), db_path)
@@ -290,13 +585,29 @@ load_project_from_db <- function(project_id, db_path = "project_manager.db") {
     deliverables <- dbGetQuery(con, "SELECT * FROM deliverables WHERE project_id = ?", 
                                params = list(project_id))
     
-    # Load staff assignments
-    staff <- dbGetQuery(con, "SELECT * FROM staff_assignments WHERE project_id = ?", 
+    # Load labor_categories
+    labor_categories <- dbGetQuery(con, "SELECT labor_cat_name FROM labor_categories WHERE project_id = ? ORDER BY labor_cat_order", 
                         params = list(project_id))
     
-    # Load task hour assignments
-    task_hours <- dbGetQuery(con, "SELECT * FROM task_hour_assignments WHERE project_id = ?", 
+    # Load role rates  
+    labor_cat_rates <- dbGetQuery(con, "SELECT * FROM labor_cat_rates WHERE project_id = ?", 
                              params = list(project_id))
+    
+    # Load role hours
+    labor_cat_hours <- dbGetQuery(con, "SELECT * FROM labor_cat_hours WHERE project_id = ?",
+                             params = list(project_id))
+    
+    # Load role staff
+    labor_cat_staff <- dbGetQuery(con, "SELECT * FROM labor_cat_staff WHERE project_id = ?",
+                             params = list(project_id))
+    
+    cat("=== load_project_from_db Debug ===\n")
+    cat("Project ID:", project_id, "\n")
+    cat("Roles loaded:", nrow(labor_categories), "\n")
+    if(nrow(labor_categories) > 0) cat("Role names:", paste(labor_categories$labor_cat_name, collapse = ", "), "\n")
+    cat("Role rates loaded:", nrow(labor_cat_rates), "\n")
+    cat("Role hours loaded:", nrow(labor_cat_hours), "\n")
+    cat("Role staff loaded:", nrow(labor_cat_staff), "\n")
     
     dbDisconnect(con)
     
@@ -305,8 +616,10 @@ load_project_from_db <- function(project_id, db_path = "project_manager.db") {
       project = project,
       tasks = tasks,
       deliverables = deliverables,
-      staff = staff,
-      task_hours = task_hours
+      labor_categories = labor_categories,          
+      labor_cat_rates = labor_cat_rates,
+      labor_cat_hours = labor_cat_hours,
+      labor_cat_staff = labor_cat_staff
     ))
     
   }, error = function(e) {
@@ -315,6 +628,7 @@ load_project_from_db <- function(project_id, db_path = "project_manager.db") {
   })
 }
 
+# Lists ----
 
 #' Get list of all projects
 get_project_list <- function(db_path = "project_manager.db") {
@@ -367,19 +681,6 @@ get_next_task_number <- function(current_data) {
   return(as.character(next_main))
 }
 
-
-# Custom sort function for hierarchical task numbers
-sort_task_numbers <- function(task_nums) {
-  # Split into main and sub components
-  split_nums <- lapply(task_nums, function(x) {
-    parts <- strsplit(as.character(x), "\\.")[[1]]
-    as.numeric(parts)
-  })
-  
-  # Sort by main task, then subtask
-  order(sapply(split_nums, function(x) x[1]), 
-        sapply(split_nums, function(x) ifelse(length(x) > 1, x[2], 0)))
-}
 
 
 
@@ -514,10 +815,10 @@ get_all_users <- function(headers=heads) {
   url <- 'https://api.weworked.com/v1/users'
   res <- GET(url, headers)
   temp <- fromJSON(content(res, "text"))
-  users <-  #bind_rows(
-    temp$Active #,
-    #temp$Disabled
-  #)
+  users <-  bind_rows(
+    temp$Active,
+    temp$Disabled
+  )
   return(users)
 }
 
@@ -551,9 +852,149 @@ get_report <- function(
   res <- GET(url, headers)
   
   report_data <- 
-    as.data.frame(fromJSON(content(res, "text"), flatten = TRUE)) %>%
-    mutate(task = shortenTaskName(task))
+    as.data.frame(fromJSON(content(res, "text"), flatten = TRUE)) #%>%
+    #mutate(task = shortenTaskName(task))
   
   return(report_data)
   
+}
+
+
+#' Fetch WeWorked hours for a specific project ID
+#' @param project_id The WeWorked project ID to fetch data for
+#' @param period_start Start date for the report (should be project start date)
+#' @param period_end End date for the report (default: today)
+#' @param headers WeWorked API headers
+get_project_hours <- function(project_id, period_start, period_end = NULL, headers = heads) {
+  tryCatch({
+    # Set default end date if not provided
+    if (is.null(period_end)) period_end <- Sys.Date()
+    
+    # Format dates for API
+    start_str <- format(period_start, "%Y-%m-%d")
+    end_str <- format(period_end, "%Y-%m-%d")
+    
+    cat("=== WeWorked API Call ===\n")
+    cat("Project ID:", project_id, "\n")
+    cat("Date range:", start_str, "to", end_str, "\n")
+    
+    # Get detailed report for the specific project only
+    report_data <- get_report(
+      period_start = start_str,
+      period_end = end_str,
+      project = project_id,  # Use project_id directly
+      headers = headers,
+      summaryOnly = FALSE
+    )
+    
+    cat("Raw WeWorked response rows:", nrow(report_data), "\n")
+    if (nrow(report_data) > 0) {
+      cat("WeWorked columns:", paste(names(report_data), collapse = ", "), "\n")
+    }
+    
+    if (nrow(report_data) > 0) {
+      # Filter for billable hours only
+      billable_data <- report_data[report_data$billable == 1, ]
+      cat("Billable rows:", nrow(billable_data), "\n")
+      
+      if (nrow(billable_data) > 0) {
+        # Create fullName by combining lastName, firstName
+        result <- billable_data %>%
+          mutate(
+            fullName = paste0(lastName, ", ", firstName),
+            hours = as.numeric(hours),
+            date = as.Date(date)
+          ) %>%
+          select(
+            fullName,
+            task,
+            hours,
+            date,
+            project,
+            projectId
+          ) %>%
+          filter(hours > 0)
+        
+        cat("Final processed rows:", nrow(result), "\n")
+        cat("Unique staff:", paste(unique(result$fullName), collapse = ", "), "\n")
+        cat("Unique tasks:", paste(unique(result$task), collapse = ", "), "\n")
+        
+        return(list(success = TRUE, data = result))
+      }
+    }
+    
+    cat("No billable hours found\n")
+    return(list(success = TRUE, data = data.frame(), message = "No billable hours found for this project"))
+    
+  }, error = function(e) {
+    cat("WeWorked API Error:", e$message, "\n")
+    return(list(success = FALSE, message = paste("WeWorked API error:", e$message)))
+  })
+}
+
+
+#' Get all WeWorked projects for lookup
+#' @param headers WeWorked API headers
+#' @return A datframe with two columns: ProjectName and ProjectID
+get_all_projects <- function(headers = heads) {
+  tryCatch({
+    url <- 'https://api.weworked.com/v1/projects'
+    res <- GET(url, headers)
+    
+    cat("WeWorked API Status:", status_code(res), "\n")
+    
+    if (status_code(res) == 200) {
+      response_text <- content(res, "text")
+      projects_data <- fromJSON(response_text)
+      
+      result <- distinct(as.data.frame(projects_data$Active), ProjectName, ProjectId)
+      
+      return(result)
+      
+    } else {
+      cat("API error - Status:", status_code(res), "\n")
+      return(list(success = FALSE, message = paste("API returned status", status_code(res))))
+    }
+    
+  }, error = function(e) {
+    cat("Error in get_all_projects:", e$message, "\n")
+    return(list(success = FALSE, message = paste("Error fetching projects:", e$message)))
+  })
+}
+
+
+# Misc ----
+
+# Helper function for empty plotly charts
+plotly_empty <- function(message = "No data available") {
+  plot_ly() %>%
+    add_annotations(
+      text = message,
+      x = 0.5,
+      y = 0.5,
+      xref = "paper",
+      yref = "paper",
+      showarrow = FALSE,
+      font = list(size = 16, color = "gray")
+    ) %>%
+    layout(
+      xaxis = list(visible = FALSE),
+      yaxis = list(visible = FALSE),
+      plot_bgcolor = "rgba(0,0,0,0)",
+      paper_bgcolor = "rgba(0,0,0,0)"
+    )
+}
+
+
+# Custom sort function for hierarchical task numbers
+sort_task_numbers <- function(task_nums) {
+  # Split into main and sub components
+  split_nums <- lapply(task_nums, function(x) {
+    parts <- strsplit(as.character(x), "\\.")[[1]]
+    as.numeric(parts)
+  })
+  
+  # Sort by main task, then subtask
+  order(sapply(split_nums, function(x) x[1]), 
+        sapply(split_nums, function(x) ifelse(length(x) > 1, x[2], 0)))
 }

@@ -1,15 +1,12 @@
 # Planhour - Project Management Shiny App
-# Main application file
 
-
-
-# Source all module files (adjust paths as needed for your structure)
-# If using {golem} framework, these would be automatically loaded
+source("global.R")
 source("R/mod_pm_dashboard.R")
 # source("R/mod_staff_view.R")      # For future implementation
 # source("R/mod_finance_view.R")    # For future implementation
+source("manage_db.R")
 
-# Define UI ----
+
 ui <- dashboardPage(
   
   dashboardHeader(title = "Planhour - Project Management"),
@@ -24,6 +21,7 @@ ui <- dashboardPage(
           menuItem("Finance View", tabName = "finance_view", icon = icon("chart-line")),
           br(),
           hr(),
+          
           # Project Summary in Sidebar
           div(id = "project_summary_sidebar", style = "margin: 10px;",
               h5("Project Summary", style = "color: white; margin-bottom: 10px;"),
@@ -38,79 +36,132 @@ ui <- dashboardPage(
               div(id = "sidebar_staff_content", 
                   style = "background-color: rgba(255,255,255,0.1); padding: 8px; border-radius: 4px; font-size: 11px; color: #ccc;",
                   "No staff assigned yet...")
-          )
+          ),
+          
+          hr(),
+          
+          actionButton("save_changes_sidebar", "Save Changes", 
+                       class = "btn-success btn-block", 
+                       icon = icon("save"),
+                       style = "margin: 10px; background-color: #28a745; border-color: #1e7e34;"),
+          br(),
+          
+          actionButton("clear_form_sidebar", "Clear Form", 
+                       class = "btn-warning btn-block", 
+                       icon = icon("eraser"),
+                       style = "margin: 10px; background-color: #f39c12; border-color: #e67e22;")
         )
     )
   ),
   
   dashboardBody(
-    # Enable shinyjs
+
     useShinyjs(),
+    
+    tags$script("
+  Shiny.addCustomMessageHandler('triggerClearForm', function(message) {
+    // Clear the unified project selector without triggering change event
+    var selectize = $('#pm_dashboard-project_name_unified').selectize()[0].selectize;
+    selectize.off('change');  // Temporarily disable change event
+    selectize.clear();
+    selectize.on('change');   // Re-enable change event
+    
+    // Clear other form fields
+    $('#pm_dashboard-project_name').val('');
+    $('#pm_dashboard-project_id').val('');
+    $('#pm_dashboard-client_name').val('');
+    $('#pm_dashboard-project_manager').val('').trigger('change');
+    $('#pm_dashboard-project_description').val('');
+    $('#pm_dashboard-total_dollar_value').val('');
+    $('#pm_dashboard-overhead_multiplier').val('1.5');
+    
+    // Trigger change events to update reactive values
+    $('#pm_dashboard-project_name').trigger('change');
+  });
+"),
     
     # Custom CSS for better styling
     tags$head(
       tags$style(HTML("
-        .content-wrapper, .right-side {
-          background-color: #f7f7f7;
-        }
-        .well {
-          background-color: white;
-          border: 1px solid #ddd;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .btn-primary {
-          background-color: #337ab7;
-          border-color: #2e6da4;
-        }
-        .btn-warning {
-          background-color: #f0ad4e;
-          border-color: #eea236;
-        }
-        .sidebar-form {
-          margin: 10px;
-        }
-        .skin-blue .main-sidebar {
-          background-color: #2c3e50;
-        }
-        .sidebar-content {
-          position: fixed !important;
-          top: 50px;
-          height: calc(100vh - 50px);
-          overflow-y: auto;
-          z-index: 1000;
-        }
-        .content-wrapper {
-          margin-left: 300px;
-        }
-        .rhandsontable {
-          font-size: 12px;
-        }
-        .dataTables_wrapper {
-          margin-top: 20px;
-        }
-      "))
-    ),
+    .content-wrapper, .right-side {
+      background-color: #f7f7f7;
+    }
+    .well {
+      background-color: white;
+      border: 1px solid #ddd;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 0px 19px 19px 19px;
+    }
+    /* RESTORE WORKING ALIGNMENT */
+    .form-group-aligned {
+      display: table !important;
+      width: 100% !important;
+      table-layout: fixed !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      line-height: 20px !important;
+      height: 20px !important;
+      border-spacing: 0 0 !important;
+    }
+    .form-group-aligned + .form-group-aligned {
+      margin-top: 1px !important;
+    }
+    .form-group-aligned .col-sm-3,
+    .form-group-aligned .col-md-3,
+    .form-group-aligned .col-xs-3 {
+      display: table-cell !important;
+      vertical-align: top !important;
+      width: 30% !important;
+      padding: 8px 0 0 0 !important;
+      float: none !important;
+      margin: 0 !important;
+      min-height: 0 !important;
+      line-height: 0 !important;
+    }
+    .form-group-aligned .col-sm-9,
+    .form-group-aligned .col-md-9,
+    .form-group-aligned .col-xs-9 {
+      display: table-cell !important;
+      vertical-align: middle !important;
+      width: 70% !important;
+      padding: 0 !important;
+      float: none !important;
+      margin: 0 !important;
+      min-height: 0 !important;
+      line-height: 0 !important;
+    }
+    .control-label-aligned {
+      font-weight: 600 !important;
+      color: #333 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      line-height: normal !important;
+      height: auto !important;
+      display: block !important;
+    }
+    .input-wrapper {
+      margin: 0 !important;
+      padding: 0 !important;
+      line-height: 0 !important;
+    }
+    .input-wrapper .form-control,
+    .input-wrapper .selectize-control,
+    .input-wrapper .selectize-input {
+      vertical-align: middle !important;
+      line-height: normal !important;
+      margin: 0 !important;
+    }
+  "))
+    ),    
     
     tabItems(
-      # Project Manager Dashboard Tab
+      # PM tab ----
       tabItem(
         tabName = "pm_dashboard",
-        mod_pm_dashboard_ui("pm_dashboard"),
-        
-        fluidRow(
-          column(12,
-                 wellPanel(
-                   h3("Project Gantt Chart"),
-                   p("Interactive timeline showing all tasks and deliverables. Hover over items for details."),
-                   div(style = "background: white; border: 1px solid #ddd; border-radius: 4px; padding: 15px; margin: 10px 0;",
-                       ggiraph::girafeOutput("pm_gantt_chart", height = "500px")
-                   )
-                 )
-          )
-        )
+        mod_pm_dashboard_ui("pm_dashboard")
       ),
       
-      # Staff View Tab (placeholder for future implementation)
+      # Staff View Tab ----
       tabItem(
         tabName = "staff_view",
         fluidRow(
@@ -134,7 +185,7 @@ ui <- dashboardPage(
         )
       ),
       
-      # Finance View Tab (placeholder for future implementation)
+      # Finance View Tab ----
       tabItem(
         tabName = "finance_view",
         fluidRow(
@@ -164,6 +215,23 @@ ui <- dashboardPage(
 # Define Server
 server <- function(input, output, session) {
   
+  # Handle clear form from sidebar
+  clear_trigger <- reactiveVal(NULL)
+  
+  # Save Changes ----
+  observeEvent(input$save_changes_sidebar, {
+    # Trigger the PM module's save functionality
+    session$sendCustomMessage("triggerSaveProject", list())
+    showNotification("Attempting to save project...", type = "message", duration = 2)
+  })
+  
+  # Clear form ----
+  observeEvent(input$clear_form_sidebar, {
+    # Trigger the clear action in the PM module
+    clear_trigger(Sys.time())  # Use timestamp to ensure reactivity
+  })
+  
+  
   # Sync sidebar menu with role selector
   observeEvent(input$user_role, {
     role_to_tab <- list(
@@ -191,7 +259,8 @@ server <- function(input, output, session) {
   })
   
   # Initialize Project Manager module
-  pm_data <- mod_pm_dashboard_server("pm_dashboard")
+  pm_data <- mod_pm_dashboard_server("pm_dashboard", clear_trigger = reactive(clear_trigger()))
+  
   
   # Update sidebar project summary
   observe({
@@ -235,7 +304,7 @@ server <- function(input, output, session) {
   
   # Update sidebar staff list
   observe({
-    staff_data <- pm_data$staff_assignments()
+    staff_data <- pm_data$labor_cat_staff()
     
     if (!is.null(staff_data) && nrow(staff_data) > 0) {
       # Get unique non-empty staff names
@@ -256,49 +325,15 @@ server <- function(input, output, session) {
     }
   })
   
+
   
-  # Initialize Project Manager module
-  pm_data <- mod_pm_dashboard_server("pm_dashboard")
-  
-  # PM Dashboard Gantt Chart
-  output$pm_gantt_chart <- ggiraph::renderGirafe({
-    req(pm_data$task_budget(), pm_data$deliverables())
-    
-    p <- create_gantt_chart(
-      task_data = pm_data$task_budget(),
-      deliverable_data = pm_data$deliverables(),
-      project_start = pm_data$project_info()$start_date,
-      project_end = pm_data$project_info()$end_date
-    )
-    
-    # Make it interactive with ggiraph
-    ggiraph::girafe(
-      ggobj = p,
-      options = list(
-        ggiraph::opts_hover_inv(css = "opacity:0.3;"),
-        ggiraph::opts_hover(css = "stroke-width:2px; stroke:black;"),
-        ggiraph::opts_tooltip(
-          css = "background-color:#333;color:white;padding:10px;border-radius:5px;font-size:12px;max-width:300px;"
-        ),
-        ggiraph::opts_zoom(min = 0.5, max = 3)
-      ),
-      height_svg = 8,
-      width_svg = 12
-    )
-  })
-  
-  
-  # For future modules, you would initialize them here:
-  # staff_data <- mod_staff_view_server("staff_view", pm_data)
-  # finance_data <- mod_finance_view_server("finance_view", pm_data)
-  
-  # Optional: Global reactive values for cross-module communication
+  # Global reactive values for cross-module communication
   global_data <- reactiveValues(
     current_user = "demo_user",
     current_role = "pm"
   )
   
-  # Optional: Session info for debugging
+  # Session info for debugging
   if (getOption("shiny.debug", FALSE)) {
     observe({
       cat("Current tab:", input$sidebar, "\n")
@@ -307,5 +342,5 @@ server <- function(input, output, session) {
   }
 }
 
-# Run the application
+
 shinyApp(ui = ui, server = server)
