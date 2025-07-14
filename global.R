@@ -851,11 +851,27 @@ get_report <- function(
   
   res <- GET(url, headers)
   
-  report_data <- 
-    as.data.frame(fromJSON(content(res, "text"), flatten = TRUE)) #%>%
-    #mutate(task = shortenTaskName(task))
+  # Check if the response is successful
+  if (status_code(res) != 200) {
+    cat("WeWorked API returned status:", status_code(res), "\n")
+    return(data.frame())  # Return empty data frame for non-200 responses
+  }
   
-  return(report_data)
+  # Check if response content is valid JSON
+  response_text <- content(res, "text")
+  if (response_text == "Not Found" || response_text == "") {
+    cat("WeWorked API returned empty or 'Not Found' response\n")
+    return(data.frame())  # Return empty data frame for invalid responses
+  }
+  
+  tryCatch({
+    report_data <- as.data.frame(fromJSON(response_text, flatten = TRUE))
+    return(report_data)
+  }, error = function(e) {
+    cat("JSON parsing error:", e$message, "\n")
+    cat("Response text:", response_text, "\n")
+    return(data.frame())  # Return empty data frame for JSON parsing errors
+  })
   
 }
 
@@ -892,39 +908,45 @@ get_project_hours <- function(project_id, period_start, period_end = NULL, heade
       cat("WeWorked columns:", paste(names(report_data), collapse = ", "), "\n")
     }
     
-    if (nrow(report_data) > 0) {
-      # Filter for billable hours only
-      billable_data <- report_data[report_data$billable == 1, ]
-      cat("Billable rows:", nrow(billable_data), "\n")
+    # Check if we got an empty response (no data logged yet)
+    if (nrow(report_data) == 0) {
+      cat("No time entries found for this project\n")
+      return(list(success = TRUE, data = data.frame(), 
+                  message = "No hours have been logged for this project yet"))
+    }
+    
+    # Filter for billable hours only
+    billable_data <- report_data[report_data$billable == 1, ]
+    cat("Billable rows:", nrow(billable_data), "\n")
+    
+    if (nrow(billable_data) > 0) {
+      # Create fullName by combining lastName, firstName
+      result <- billable_data %>%
+        mutate(
+          fullName = paste0(lastName, ", ", firstName),
+          hours = as.numeric(hours),
+          date = as.Date(date)
+        ) %>%
+        select(
+          fullName,
+          task,
+          hours,
+          date,
+          project,
+          projectId
+        ) %>%
+        filter(hours > 0)
       
-      if (nrow(billable_data) > 0) {
-        # Create fullName by combining lastName, firstName
-        result <- billable_data %>%
-          mutate(
-            fullName = paste0(lastName, ", ", firstName),
-            hours = as.numeric(hours),
-            date = as.Date(date)
-          ) %>%
-          select(
-            fullName,
-            task,
-            hours,
-            date,
-            project,
-            projectId
-          ) %>%
-          filter(hours > 0)
-        
-        cat("Final processed rows:", nrow(result), "\n")
-        cat("Unique staff:", paste(unique(result$fullName), collapse = ", "), "\n")
-        cat("Unique tasks:", paste(unique(result$task), collapse = ", "), "\n")
-        
-        return(list(success = TRUE, data = result))
-      }
+      cat("Final processed rows:", nrow(result), "\n")
+      cat("Unique staff:", paste(unique(result$fullName), collapse = ", "), "\n")
+      cat("Unique tasks:", paste(unique(result$task), collapse = ", "), "\n")
+      
+      return(list(success = TRUE, data = result))
     }
     
     cat("No billable hours found\n")
-    return(list(success = TRUE, data = data.frame(), message = "No billable hours found for this project"))
+    return(list(success = TRUE, data = data.frame(), 
+                message = "No billable hours found for this project"))
     
   }, error = function(e) {
     cat("WeWorked API Error:", e$message, "\n")

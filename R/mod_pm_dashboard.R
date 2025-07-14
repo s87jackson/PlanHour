@@ -593,22 +593,27 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
         task_calculated_cost <- 0
         
         if (nrow(rates_data_db) > 0 && nrow(hours_data_db) > 0) {
+          # Ensure consistent data types for filtering
+          task_num_char <- as.character(task_num)
+          
           # Filter rates and hours for this task (considering variation type)
           if (vary_by == "Task") {
-            task_rates <- rates_data_db[rates_data_db$task_number == task_num, ]
-            task_hours <- hours_data_db[hours_data_db$task_number == task_num, ]
+            task_rates <- rates_data_db[as.character(rates_data_db$task_number) == task_num_char, ]
+            task_hours <- hours_data_db[as.character(hours_data_db$task_number) == task_num_char, ]
           } else if (vary_by == "Year") {
             # For Year mode, use default task "1" and sum across all years
-            task_rates <- rates_data_db[rates_data_db$task_number == "1", ]
-            task_hours <- hours_data_db[hours_data_db$task_number == "1", ]
+            task_rates <- rates_data_db[as.character(rates_data_db$task_number) == "1", ]
+            task_hours <- hours_data_db[as.character(hours_data_db$task_number) == "1", ]
           } else if (vary_by == "Both") {
             # For Both mode, filter by actual task number and include all years
-            task_rates <- rates_data_db[rates_data_db$task_number == task_num, ]
-            task_hours <- hours_data_db[hours_data_db$task_number == task_num, ]
+            task_rates <- rates_data_db[as.character(rates_data_db$task_number) == task_num_char, ]
+            task_hours <- hours_data_db[as.character(hours_data_db$task_number) == task_num_char, ]
           }
           
           cat("=== COST CHECK DEBUG ===\n")
-          cat("Task:", task_num, "Vary by:", vary_by, "\n")
+          cat("Task:", task_num, "(char:", task_num_char, ") Vary by:", vary_by, "\n")
+          cat("Available task_numbers in rates:", paste(unique(rates_data_db$task_number), collapse = ", "), "\n")
+          cat("Available task_numbers in hours:", paste(unique(hours_data_db$task_number), collapse = ", "), "\n")
           cat("Task rates found:", nrow(task_rates), "\n")
           cat("Task hours found:", nrow(task_hours), "\n")
           
@@ -1148,7 +1153,23 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
             cat("LaborCategory rates found:", nrow(result$labor_cat_rates), "\n")
             
             # Store database format
+            cat("BEFORE storing rates - sample data from DB:\n")
+            if (nrow(result$labor_cat_rates) > 0) {
+              for (i in 1:min(3, nrow(result$labor_cat_rates))) {
+                row <- result$labor_cat_rates[i, ]
+                cat("  DB Row", i, ":", row$labor_cat_name, "task_number:", row$task_number, "year_number:", row$year_number, "\n")
+              }
+            }
             laborCat_rates_data(result$labor_cat_rates)
+            
+            cat("AFTER storing rates - checking reactive:\n")
+            stored_rates <- laborCat_rates_data()
+            if (nrow(stored_rates) > 0) {
+              for (i in 1:min(3, nrow(stored_rates))) {
+                row <- stored_rates[i, ]
+                cat("  Reactive Row", i, ":", row$labor_cat_name, "task_number:", row$task_number, "year_number:", row$year_number, "\n")
+              }
+            }
             
             # Determine variation type from loaded data
             has_multiple_years <- length(unique(result$labor_cat_rates$year_number)) > 1
@@ -1179,8 +1200,19 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
               } else if (vary_by_value == "Both") {
                 unique_years <- unique(result$labor_cat_rates$year_number)
                 unique_tasks <- unique(result$labor_cat_rates$task_number)
+                
+                # Clean up task numbers - extract just the numeric part if they contain underscores
+                clean_task_numbers <- sapply(unique_tasks, function(task) {
+                  if (grepl("_", task)) {
+                    # Extract first part before underscore
+                    strsplit(task, "_")[[1]][1]
+                  } else {
+                    task
+                  }
+                })
+                
                 task_year_combinations <- expand.grid(
-                  Task = paste0("Task_", sort(as.numeric(unique_tasks))),
+                  Task = paste0("Task_", sort(as.numeric(clean_task_numbers))),
                   Year = sort(unique_years),
                   stringsAsFactors = FALSE
                 )
@@ -1277,7 +1309,23 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
             cat("LaborCategory hours found:", nrow(result$labor_cat_hours), "\n")
             
             # Store database format
+            cat("BEFORE storing hours - sample data from DB:\n")
+            if (nrow(result$labor_cat_hours) > 0) {
+              for (i in 1:min(3, nrow(result$labor_cat_hours))) {
+                row <- result$labor_cat_hours[i, ]
+                cat("  DB Row", i, ":", row$labor_cat_name, "task_number:", row$task_number, "year_number:", row$year_number, "\n")
+              }
+            }
             laborCat_hours_data(result$labor_cat_hours)
+            
+            cat("AFTER storing hours - checking reactive:\n")
+            stored_hours <- laborCat_hours_data()
+            if (nrow(stored_hours) > 0) {
+              for (i in 1:min(3, nrow(stored_hours))) {
+                row <- stored_hours[i, ]
+                cat("  Reactive Row", i, ":", row$labor_cat_name, "task_number:", row$task_number, "year_number:", row$year_number, "\n")
+              }
+            }
             
             # Convert to matrix format for display table (using same logic as rates)
             if (!is.null(labor_categories_df) && nrow(labor_categories_df) > 0 && !is.null(tasks_df) && nrow(tasks_df) > 0) {
@@ -1303,8 +1351,19 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
               } else if (vary_by_value == "Both") {
                 unique_years <- unique(result$labor_cat_hours$year_number)
                 unique_tasks <- unique(result$labor_cat_hours$task_number)
+                
+                # Clean up task numbers - extract just the numeric part if they contain underscores
+                clean_task_numbers <- sapply(unique_tasks, function(task) {
+                  if (grepl("_", task)) {
+                    # Extract first part before underscore
+                    strsplit(task, "_")[[1]][1]
+                  } else {
+                    task
+                  }
+                })
+                
                 task_year_combinations <- expand.grid(
-                  Task = paste0("Task_", sort(as.numeric(unique_tasks))),
+                  Task = paste0("Task_", sort(as.numeric(clean_task_numbers))),
                   Year = sort(unique_years),
                   stringsAsFactors = FALSE
                 )
@@ -1477,8 +1536,14 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
               )
             } else {
               cat("No WeWorked hours found\n")
+              # Use the message from the API response if available
+              notification_message <- if (!is.null(ww_result$message)) {
+                ww_result$message
+              } else {
+                "No billable hours found in WeWorked for this project"
+              }
               showNotification(
-                "No billable hours found in WeWorked for this project",
+                notification_message,
                 type = "message",
                 duration = 3
               )
@@ -2324,7 +2389,21 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
     observeEvent(rates_data(), {
       if (!is.null(rates_data()) && nrow(rates_data()) > 0) {
         current_rates <- rates_data()
-        vary_by <- input$rates_hours_vary_by
+        
+        # Detect vary_by mode from column names instead of relying on UI input
+        # This is more reliable during project loading when UI may not be updated yet
+        col_names <- names(current_rates)
+        col_names <- col_names[col_names != "LaborCategory"]
+        
+        if (any(grepl("Task_\\d+_Year_\\d+", col_names))) {
+          vary_by <- "Both"
+        } else if (any(startsWith(col_names, "Year_"))) {
+          vary_by <- "Year"
+        } else {
+          vary_by <- "Task"
+        }
+        
+        cat("DEBUG: Detected vary_by mode from columns:", vary_by, "\n")
         
         # DEBUG: Show what was in the reactive before sync
         old_rates <- laborCat_rates_data()
@@ -2350,30 +2429,36 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
             if (col_name != "LaborCategory") {
               hourly_rate <- current_rates[[col_name]][i]
               if (!is.na(hourly_rate)) {
-                # Parse column name based on variation type
-                if (vary_by == "Task" && startsWith(col_name, "Task_")) {
+                cat("SYNC RATES: Processing column:", col_name, "for", labor_cat_name, "with rate:", hourly_rate, "vary_by:", vary_by, "\n")
+                # Parse column name based on variation type - handle Both mode first (most specific)
+                if (vary_by == "Both" && grepl("Task_\\d+_Year_\\d+", col_name)) {
+                  # Parse "Task_1_Year_1" format correctly
+                  parts <- strsplit(col_name, "_")[[1]]
+                  cat("DEBUG PARSING: Column:", col_name, "Parts:", paste(parts, collapse=","), "Length:", length(parts), "\n")
+                  if (length(parts) >= 4 && parts[1] == "Task" && parts[3] == "Year") {
+                    task_number <- parts[2]  # Get "1" from "Task_1_Year_1" 
+                    year_number <- paste0(parts[3], "_", parts[4])  # Get "Year_1" from "Task_1_Year_1"
+                    
+                    cat("DEBUG PARSING STEP 1: task_number set to:", task_number, "\n")
+                    cat("DEBUG PARSING STEP 2: year_number set to:", year_number, "\n")
+                    cat("DEBUG PARSING STEP 3: About to exit parsing block\n")
+                  } else {
+                    cat("ERROR SYNC RATES: Invalid column format:", col_name, "Expected format: Task_X_Year_Y\n")
+                    next
+                  }
+                } else if (vary_by == "Task" && startsWith(col_name, "Task_") && !grepl("Year", col_name)) {
+                  # Only process simple Task columns (without Year)
                   task_number <- sub("Task_(\\d+)", "\\1", col_name)
                   year_number <- "Year_1"  # Default for Task-only mode
                 } else if (vary_by == "Year" && startsWith(col_name, "Year_")) {
                   task_number <- "1"  # Default for Year-only mode (just the number)
                   year_number <- col_name
-                } else if (vary_by == "Both" && grepl("Task_\\d+_Year_\\d+", col_name)) {
-                  # Parse "Task_1_Year_1" format correctly
-                  parts <- strsplit(col_name, "_")[[1]]
-                  if (length(parts) >= 4 && parts[1] == "Task" && parts[3] == "Year") {
-                    task_number <- parts[2]  # Get "1" from "Task_1_Year_1" 
-                    year_number <- paste0(parts[3], "_", parts[4])  # Get "Year_1" from "Task_1_Year_1"
-                    
-                    cat("DEBUG SYNC RATES: Column:", col_name, "-> task_number:", task_number, "year_number:", year_number, "\n")
-                  } else {
-                    cat("ERROR SYNC RATES: Invalid column format:", col_name, "\n")
-                    next
-                  }
                 } else {
+                  cat("SYNC RATES: No parsing rule matched for column:", col_name, "in vary_by mode:", vary_by, "\n")
                   next  # Skip invalid column names
                 }
                 
-                cat("DEBUG: About to store - labor_cat:", labor_cat_name, "task_number:", task_number, "year_number:", year_number, "rate:", hourly_rate, "\n")
+                cat("DEBUG RATES: About to store - labor_cat:", labor_cat_name, "task_number:", task_number, "year_number:", year_number, "rate:", hourly_rate, "\n")
                 
                 labor_cat_rates_list[[length(labor_cat_rates_list) + 1]] <- data.frame(
                   labor_cat_name = labor_cat_name,
@@ -2398,7 +2483,21 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
     observeEvent(hours_data(), {
       if (!is.null(hours_data()) && nrow(hours_data()) > 0) {
         current_hours <- hours_data()
-        vary_by <- input$rates_hours_vary_by
+        
+        # Detect vary_by mode from column names instead of relying on UI input
+        # This is more reliable during project loading when UI may not be updated yet
+        col_names <- names(current_hours)
+        col_names <- col_names[col_names != "LaborCategory"]
+        
+        if (any(grepl("Task_\\d+_Year_\\d+", col_names))) {
+          vary_by <- "Both"
+        } else if (any(startsWith(col_names, "Year_"))) {
+          vary_by <- "Year"
+        } else {
+          vary_by <- "Task"
+        }
+        
+        cat("DEBUG: Detected vary_by mode from hours columns:", vary_by, "\n")
         # Clear existing data first
         laborCat_hours_data(data.frame(
           labor_cat_name = character(0),
@@ -2416,30 +2515,33 @@ mod_pm_dashboard_server <- function(id, clear_trigger = reactive(NULL)){
             if (col_name != "LaborCategory") {
               planned_hours <- current_hours[[col_name]][i]
               if (!is.na(planned_hours)) {
-                # Parse column name based on variation type
-                if (vary_by == "Task" && startsWith(col_name, "Task_")) {
+                cat("SYNC HOURS: Processing column:", col_name, "for", labor_cat_name, "with hours:", planned_hours, "vary_by:", vary_by, "\n")
+                # Parse column name based on variation type - handle Both mode first (most specific)
+                if (vary_by == "Both" && grepl("Task_\\d+_Year_\\d+", col_name)) {
+                  # Parse "Task_1_Year_1" format correctly  
+                  parts <- strsplit(col_name, "_")[[1]]
+                  cat("DEBUG PARSING HOURS: Column:", col_name, "Parts:", paste(parts, collapse=","), "Length:", length(parts), "\n")
+                  if (length(parts) >= 4 && parts[1] == "Task" && parts[3] == "Year") {
+                    task_number <- parts[2]  # Get "1" from "Task_1_Year_1"
+                    year_number <- paste0(parts[3], "_", parts[4])  # Get "Year_1" from "Task_1_Year_1"
+                    cat("DEBUG SYNC HOURS: Parsed task_number:", task_number, "year_number:", year_number, "\n")
+                  } else {
+                    cat("ERROR SYNC HOURS: Invalid column format:", col_name, "Expected format: Task_X_Year_Y\n")
+                    next  # Skip invalid column names
+                  }
+                } else if (vary_by == "Task" && startsWith(col_name, "Task_") && !grepl("Year", col_name)) {
+                  # Only process simple Task columns (without Year)
                   task_number <- sub("Task_(\\d+)", "\\1", col_name)
                   year_number <- "Year_1"  # Default for Task-only mode
                 } else if (vary_by == "Year" && startsWith(col_name, "Year_")) {
                   task_number <- "1"  # Default for Year-only mode (just the number)
                   year_number <- col_name
-                } else if (vary_by == "Both" && grepl("Task_\\d+_Year_\\d+", col_name)) {
-                  # Parse "Task_1_Year_1" format correctly  
-                  parts <- strsplit(col_name, "_")[[1]]
-                  cat("DEBUG Sync HOURS: Column:", col_name, "Parts:", paste(parts, collapse=","), "\n")
-                  if (length(parts) >= 4 && parts[1] == "Task" && parts[3] == "Year") {
-                    task_number <- parts[2]  # Get "1" from "Task_1_Year_1"
-                    year_number <- paste0(parts[3], "_", parts[4])  # Get "Year_1" from "Task_1_Year_1"
-                    cat("DEBUG Sync HOURS: Parsed task_number:", task_number, "year_number:", year_number, "\n")
-                  } else {
-                    cat("ERROR SYNC HOURS: Invalid column format:", col_name, "\n")
-                    next  # Skip invalid column names
-                  }
                 } else {
+                  cat("SYNC HOURS: No parsing rule matched for column:", col_name, "in vary_by mode:", vary_by, "\n")
                   next  # Skip invalid column names
                 }
                 
-                cat("DEBUG: About to store - labor_cat:", labor_cat_name, "task_number:", task_number, "year_number:", year_number, "hours:", planned_hours, "\n")
+                cat("DEBUG HOURS: About to store - labor_cat:", labor_cat_name, "task_number:", task_number, "year_number:", year_number, "hours:", planned_hours, "\n")
                 
                 labor_cat_hours_list[[length(labor_cat_hours_list) + 1]] <- data.frame(
                   labor_cat_name = labor_cat_name,
